@@ -10,12 +10,15 @@
 #
 #
 # Created by Chris Zimmerman 3-22-22 
-# HUGE THANK YOU to @joshvotnoy -- feedback on March 7th led to this script being
+# HUGE THANK YOU to @joshnovotny-- feedback on March 7th led to this script being
 # so much better
 # Updates Committed February 24th 2023
 # V5 Commit Date - March 10th 2023
 # V6 Commit Date - March 20th 2023
-# 
+#
+# Change Log
+# - July 24th 2023: Added the missing logic so admins can use the sharedfilepath variable (Thank you, @joshnovotny)
+# - Corrected a typo in my credits for @joshnovotny, apologies for the mistake all this time
 #
 # 
 # By using this script you agree to using it "as -is".
@@ -72,6 +75,12 @@ EOF
 jsonpath="$filepathset.json"
 csvpath="$filepathset.csv"
 pspath="$filepathset.py"
+
+else
+
+jsonpath="$sharedfilepath.json"
+csvpath="$sharedfilepath.csv"
+pspath="$sharedfilepath.py"
 
 	if [[ -e $jsonpath ]] || [[ -e $csvpath ]] || [[ -e $pspath ]]; then
 		echo "found duplicate files, alerting user"
