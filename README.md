@@ -1,6 +1,6 @@
 # Jamf-API-Recovery-Lock-by-Group
 
-This script does use Python in order to work. As it parses information from a JSON file and dumps it to a CSV. 
+This script does use Python in order to work as it parses information from a JSON file and dumps it to a CSV. 
 
 This is a script I made to try a couple of new things. The goal is to leverage the API to pull the serial number and management id from the inventory record of all computers. 
 
