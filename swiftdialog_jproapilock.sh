@@ -26,6 +26,23 @@
 # By using this script you agree to using it "as -is".
 ########################################################
 
+#if you would rather not have to type in credentials each time, set prefill to 1 and specify a file that has your credentials
+prefill="0"
+#file path for the pre-fill
+prefillfilepath="/var/tmp/prefillfile.txt"
+#file should look like this:
+# username : username
+# password : password
+# jurl : https://instancename.jamfcloud.com
+
+### sample script you can use to make this pre-fill file
+#file="/var/tmp/prefillfile.txt"
+#
+#echo "username : username" > $file
+#echo "password : password" >> $file
+#echo "jurl : https://instance.jamfcloud.com" >> $file
+########################################################
+
 ############# Dialog Binary ############################
 dialogBinary="/usr/local/bin/dialog"
 ########################################################
@@ -43,6 +60,7 @@ message2="Number of Managed Computers= Total number of computers that are manage
 
 message3="Computer Serial Numbers Field. On this field, you can enter 1 or more serial numbers in your Jamf Pro Environment. All you have to do is separate the Serial Numbers with a comma. \n\ni.e. serialnumber1,serialnumber2,serialnumber3,etc."
 errmessage="There were no management ids found for the serials specified. Either the smart group selected or the serial numbers do not exist. Please try again"
+prefilleerr="There was an issue with the prefill file, please leverage the included script and try again. \n\nERROR: One or More Missing Values found."
 
 #########################################################
 ############# Script Begins #############################
@@ -58,9 +76,10 @@ if [[ ! -e $log ]]; then
 fi
 
 function dialogUpdate () {
+	
 	echo "$1" >> "$commandfile"
+	
 }
-
 
 function preflight {
 	# Check for Dialog and install if not found
@@ -129,7 +148,8 @@ function dialogInstall {
 	/bin/rm -Rf "$tempDirectory"
 
 }
-function start {
+
+function starta {
 
 $dialogBinary \
 --title \Set\ Recovery\ Lock \
@@ -144,6 +164,7 @@ $dialogBinary \
 --selecttitle \Select\ Password\ Type,radio \
 --selectvalues \Random\,Set\ Your\ Own \
 --big \
+--moveable \
 --button1text \Next \
 --helpmessage \ "$message2" \ 2>&1 > $file
 
@@ -176,11 +197,65 @@ fi
 
 }
 
+function startb {
+	
+	username=$(cat $prefillfilepath | grep "username" | awk '{print $NF}')
+	password=$(cat $prefillfilepath | grep "password" | awk '{print $NF}')
+	jurl=$(cat $prefillfilepath | grep "jurl" | awk '{print $NF}')
+	
+	echo "$username $password $jurl"
+	
+	if [[ -z $username ]] || [[ -z $password ]] || [[ -z $jurl ]]; then
+		$dialogBinary \
+		--title \Pre-Fill\ Error \
+		--icon \warning \
+		--message \ "$prefilleerr " \
+		--button1text \quit
+		exit 1
+	else
+		$dialogBinary \
+		--title \Set\ Recovery\ Lock \
+		--message \Please\ enter\ values\ into\ the\ required\ fields \
+		--icon \info \
+		--textfield \Number\ of\ Managed\ Computers\,regex="^[0-9]",regexerror="This must be a Number",required \
+		--selecttitle \Select\ Your\ Workflow,radio \
+		--selectvalues \Static\ or\ Smart\ Group,Manual\ Entry \
+		--selecttitle \Select\ Password\ Type,radio \
+		--selectvalues \Random\,Set\ Your\ Own \
+		--moveable \
+		--big \
+		--button1text \Next \
+		--helpmessage \ "$message2" \ 2>&1 > $file
+	fi
+	
+	numberofcomputers=$(cat $file | grep "Number of Managed Computers" | awk '{print $NF}')
+	workflow=$(cat $file | grep "index" | grep "Workflow" | awk '{print $NF}' | xargs)
+	passwordtype=$(cat $file | grep "index" | grep "Password" | awk '{print $NF}' | xargs)
+	
+	rm -r $file
+	
+	userpass64=$(printf '%s' "${username}:${password}" | /usr/bin/iconv -t ISO-8859-1 | /usr/bin/base64 -i - )
+	credentials=$(curl -s -X POST "$jurl/api/v1/auth/token" -H "accept: application/json" -H "Authorization: Basic '$userpass64'" | awk  '/token/{print $NF}' | tr -d \",)
+	
+	if [[ -z $credentials ]]; then
+		$dialogBinary \
+		--title \Error \
+		--icon \warning \
+		--message \ "$message1 " 
+		updateScriptLog "Invalid Credentials -- unable to obtain Bearer Token. Please try again."
+		exit 1
+	else
+		updateScriptLog "API Credentials work, invalidating token"
+		responseCode=$(curl -w "%{http_code}" -H "Authorization: Bearer ${credentials}" $jurl/api/v1/auth/invalidate-token -X POST -s -o /dev/null)
+		if [[ ${responseCode} == 204 ]]; then
+			updateScriptLog  "Test Token Successfully Invalidated"
+		fi
+	fi
 
+}
 
 function premagic {
 	
-
 if [[ $workflow -eq 0 ]] && [[ $passwordtype -eq 0 ]]; then
 	updateScriptLog "Workflow Selected: Static / Smart Group. Password Option: Random."
 	promptbeforerun="$dialogBinary \ 
@@ -218,7 +293,6 @@ elif [[ $workflow -eq 1 ]] && [[ $passwordtype -eq 1 ]]; then
 	--textfield \Recovery\ Lock\ Password,required \
     --helpmessage \"$message3\" "
 fi
-
 
 eval ${promptbeforerun} 2>&1 > $file
 
@@ -395,6 +469,7 @@ commandtime="$dialogBinary \
 --progresstext \"Sending Recovery Lock Commands\" \
 --button1text \"Wait\" \
 --button1disabled \
+--moveable \
 --ontop \
 --commandfile \"$commandfile\" "
 
@@ -455,6 +530,7 @@ elif [[ $rmpass -eq 1 ]]; then
 		fi
 		dialogUpdate "progress: increment ${piv}"
 		dialogUpdate "progresstext: Sending command $cpb of $correctserials"
+		sleep 10
 	done
 fi
 
@@ -504,7 +580,17 @@ function cleanup {
 }
 
 preflight
-start 
+
+if [[ $prefill -eq 1 ]]; then
+	if [[ -e $prefillfilepath ]]; then
+		startb 
+	else
+		echo "prefill selected, but the specified file path does not exist"
+		exit 1
+	fi
+else
+	starta
+fi
 premagic
 magic 
 finallog 
