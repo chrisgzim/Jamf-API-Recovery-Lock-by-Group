@@ -26,23 +26,6 @@
 # By using this script you agree to using it "as -is".
 ########################################################
 
-#if you would rather not have to type in credentials each time, set prefill to 1 and specify a file that has your credentials
-prefill="0"
-#file path for the pre-fill
-prefillfilepath="/var/tmp/prefillfile.txt"
-#file should look like this:
-# username : username
-# password : password
-# jurl : https://instancename.jamfcloud.com
-
-### sample script you can use to make this pre-fill file
-#file="/var/tmp/prefillfile.txt"
-#
-#echo "username : username" > $file
-#echo "password : password" >> $file
-#echo "jurl : https://instance.jamfcloud.com" >> $file
-########################################################
-
 ############# Dialog Binary ############################
 dialogBinary="/usr/local/bin/dialog"
 ########################################################
@@ -60,7 +43,6 @@ message2="Number of Managed Computers= Total number of computers that are manage
 
 message3="Computer Serial Numbers Field. On this field, you can enter 1 or more serial numbers in your Jamf Pro Environment. All you have to do is separate the Serial Numbers with a comma. \n\ni.e. serialnumber1,serialnumber2,serialnumber3,etc."
 errmessage="There were no management ids found for the serials specified. Either the smart group selected or the serial numbers do not exist. Please try again"
-prefilleerr="There was an issue with the prefill file, please leverage the included script and try again. \n\nERROR: One or More Missing Values found."
 
 #########################################################
 ############# Script Begins #############################
@@ -76,10 +58,9 @@ if [[ ! -e $log ]]; then
 fi
 
 function dialogUpdate () {
-	
 	echo "$1" >> "$commandfile"
-	
 }
+
 
 function preflight {
 	# Check for Dialog and install if not found
@@ -146,98 +127,104 @@ function dialogInstall {
 	
 	# Remove the temporary working directory when done
 	/bin/rm -Rf "$tempDirectory"
-
+	
 }
 
-function starta {
 
-$dialogBinary \
---title \Set\ Recovery\ Lock \
---message \Please\ enter\ values\ into\ the\ required\ fields \
---icon \info \
---textfield \Number\ of\ Managed\ Computers\,regex="^[0-9]",regexerror="This must be a Number",required \
---textfield \API\ Username\,required \
---textfield \API\ Password\,required,secure \
---textfield \Jamf\ Pro\ Server\ URL\,prompt="https://instance.jamfcloud.com",required \
---selecttitle \Select\ Your\ Workflow,radio \
---selectvalues \Static\ or\ Smart\ Group,Manual\ Entry \
---selecttitle \Select\ Password\ Type,radio \
---selectvalues \Random\,Set\ Your\ Own \
---big \
---moveable \
---button1text \Next \
---helpmessage \ "$message2" \ 2>&1 > $file
-
-username=$(cat $file | grep "API Username" | awk '{print $NF}')
-password=$(cat $file | grep "API Password" | awk '{print $NF}')
-jurl=$(cat $file | grep "Jamf Pro Server URL" | awk '{print $NF}')
-numberofcomputers=$(cat $file | grep "Number of Managed Computers" | awk '{print $NF}')
-workflow=$(cat $file | grep "index" | grep "Workflow" | awk '{print $NF}' | xargs)
-passwordtype=$(cat $file | grep "index" | grep "Password" | awk '{print $NF}' | xargs)
-
-rm -r $file
-
-userpass64=$(printf '%s' "${username}:${password}" | /usr/bin/iconv -t ISO-8859-1 | /usr/bin/base64 -i - )
-credentials=$(curl -s -X POST "$jurl/api/v1/auth/token" -H "accept: application/json" -H "Authorization: Basic '$userpass64'" | awk  '/token/{print $NF}' | tr -d \",)
-
-if [[ -z $credentials ]]; then
-	$dialogBinary \
-	--title \Error \
-	--icon \warning \
-	--message \ "$message1 " 
-	updateScriptLog "Invalid Credentials -- unable to obtain Bearer Token. Please try again."
-	exit 1
-else
-	updateScriptLog "API Credentials work, invalidating token"
-	responseCode=$(curl -w "%{http_code}" -H "Authorization: Bearer ${credentials}" $jurl/api/v1/auth/invalidate-token -X POST -s -o /dev/null)
-	if [[ ${responseCode} == 204 ]]; then
-		updateScriptLog  "Test Token Successfully Invalidated"
-	fi
-fi
-
-}
-
-function startb {
-	
-	username=$(cat $prefillfilepath | grep "username" | awk '{print $NF}')
-	password=$(cat $prefillfilepath | grep "password" | awk '{print $NF}')
-	jurl=$(cat $prefillfilepath | grep "jurl" | awk '{print $NF}')
-	
-	echo "$username $password $jurl"
-	
-	if [[ -z $username ]] || [[ -z $password ]] || [[ -z $jurl ]]; then
-		$dialogBinary \
-		--title \Pre-Fill\ Error \
-		--icon \warning \
-		--message \ "$prefilleerr " \
-		--button1text \quit
-		exit 1
+function gathercredentials {
+	if [[ $apiroleusage == "true" ]]; then
+		getapiroletoken
 	else
-		$dialogBinary \
-		--title \Set\ Recovery\ Lock \
-		--message \Please\ enter\ values\ into\ the\ required\ fields \
-		--icon \info \
-		--textfield \Number\ of\ Managed\ Computers\,regex="^[0-9]",regexerror="This must be a Number",required \
-		--selecttitle \Select\ Your\ Workflow,radio \
-		--selectvalues \Static\ or\ Smart\ Group,Manual\ Entry \
-		--selecttitle \Select\ Password\ Type,radio \
-		--selectvalues \Random\,Set\ Your\ Own \
-		--moveable \
-		--big \
-		--button1text \Next \
-		--helpmessage \ "$message2" \ 2>&1 > $file
+		getaccounttoken
 	fi
+}
+
+function getapiroletoken {
+	current_epoch=$(date +%s)
+	response=$(curl --silent --location --request POST "${url}/api/oauth/token" \
+		--header "Content-Type: application/x-www-form-urlencoded" \
+		--data-urlencode "client_id=${username}" \
+		--data-urlencode "grant_type=client_credentials" \
+		--data-urlencode "client_secret=${password}")
+	token=$(echo "$response" | plutil -extract access_token raw -)
+	token_expires_in=$(echo "$response" | plutil -extract expires_in raw -)
+	if [[  $token_expires_in =~ ^[0-9]+$ ]]; then
+		echo "api token seems to be good"
+	else
+		token_expires_in=0
+		echo "uh oh"
+	fi
+	token_expiration_epoch=$(($current_epoch + $token_expires_in - 1))
 	
+}
+
+function getaccounttoken {
+	response=$(curl -s -u "$username":"$password" "$url"/api/v1/auth/token -X POST)
+	token=$(echo "$response" | plutil -extract token raw -)
+	token_expires_in=$(echo "$response" | plutil -extract expires raw - | awk -F . '{print $1}')
+	token_expiration_epoch=$(date -j -f "%Y-%m-%dT%T" "$token_expires_in" +"%s")
+}
+
+checkTokenExpiration() {
+	current_epoch=$(date +%s)
+	if [[ token_expiration_epoch -ge current_epoch ]]
+	then
+		echo "Token valid until the following epoch time: " "$token_expiration_epoch"
+	else
+		echo "No valid token available, getting new token"
+		gathercredentials
+	fi
+}
+
+invalidateToken() {
+	responseCode=$(curl -w "%{http_code}" -H "Authorization: Bearer ${access_token}" $url/api/v1/auth/invalidate-token -X POST -s -o /dev/null)
+	if [[ ${responseCode} == 204 ]]
+	then
+		updateScriptLog "Token successfully invalidated"
+		access_token=""
+		token_expiration_epoch="0"
+	elif [[ ${responseCode} == 401 ]]
+	then
+		updateScriptLog "Token already invalid"
+	else
+		updateScriptLog "An unknown error occurred invalidating the token"
+	fi
+}
+
+function start {
+	
+	$dialogBinary \
+	--title \Set\ Recovery\ Lock \
+	--message \Please\ enter\ values\ into\ the\ required\ fields \
+	--checkbox \ "API Role" \
+	--icon \info \
+	--textfield \Number\ of\ Managed\ Computers\,regex="^[0-9]",regexerror="This must be a Number",required \
+	--textfield \API\ Username\,required \
+	--textfield \API\ Password\,required,secure \
+	--textfield \Jamf\ Pro\ Server\ URL\,prompt="https://instance.jamfcloud.com",required \
+	--selecttitle \Select\ Your\ Workflow,radio \
+	--selectvalues \Static\ or\ Smart\ Group,Manual\ Entry \
+	--selecttitle \Select\ Password\ Type,radio \
+	--selectvalues \Random\,Set\ Your\ Own \
+	--big \
+	--moveable \
+	--height \425 \
+	--button1text \Next \
+	--helpmessage \ "$message2" \ 2>&1 > $file
+	
+	username=$(cat $file | grep "API Username" | awk '{print $NF}')
+	password=$(cat $file | grep "API Password" | awk '{print $NF}')
+	url=$(cat $file | grep "Jamf Pro Server URL" | awk '{print $NF}')
 	numberofcomputers=$(cat $file | grep "Number of Managed Computers" | awk '{print $NF}')
 	workflow=$(cat $file | grep "index" | grep "Workflow" | awk '{print $NF}' | xargs)
 	passwordtype=$(cat $file | grep "index" | grep "Password" | awk '{print $NF}' | xargs)
+	apiroleusage=$(cat $file | grep "API Role" | awk '{print $NF}' | xargs)
 	
 	rm -r $file
 	
-	userpass64=$(printf '%s' "${username}:${password}" | /usr/bin/iconv -t ISO-8859-1 | /usr/bin/base64 -i - )
-	credentials=$(curl -s -X POST "$jurl/api/v1/auth/token" -H "accept: application/json" -H "Authorization: Basic '$userpass64'" | awk  '/token/{print $NF}' | tr -d \",)
+	gathercredentials
 	
-	if [[ -z $credentials ]]; then
+	if [[ $token =~ "Could not extract value"* ]] || [[ -z $token ]]; then
 		$dialogBinary \
 		--title \Error \
 		--icon \warning \
@@ -246,100 +233,102 @@ function startb {
 		exit 1
 	else
 		updateScriptLog "API Credentials work, invalidating token"
-		responseCode=$(curl -w "%{http_code}" -H "Authorization: Bearer ${credentials}" $jurl/api/v1/auth/invalidate-token -X POST -s -o /dev/null)
+		invalidateToken
 		if [[ ${responseCode} == 204 ]]; then
 			updateScriptLog  "Test Token Successfully Invalidated"
 		fi
 	fi
-
+	
 }
 
 function premagic {
 	
-if [[ $workflow -eq 0 ]] && [[ $passwordtype -eq 0 ]]; then
-	updateScriptLog "Workflow Selected: Static / Smart Group. Password Option: Random."
-	promptbeforerun="$dialogBinary \ 
+	
+	if [[ $workflow -eq 0 ]] && [[ $passwordtype -eq 0 ]]; then
+		updateScriptLog "Workflow Selected: Static / Smart Group. Password Option: Random."
+		promptbeforerun="$dialogBinary \ 
 	--title \Final\Parameters \
 	--title \Final\ Parameters \
 	--icon \info \
 	--message \Please\ fill\ in\ the\ Required\ Fields \
-    --textfield \Computer\ Group\ ID,regex='^[0-9]',regexerror='This must be a Number',required "
-elif [[ $workflow -eq 0 ]] && [[ $passwordtype -eq 1 ]]; then
-	updateScriptLog "Workflow Selected: Static / Smart Group. Password Option: Set your own."
-	promptbeforerun="$dialogBinary \ 
+	--textfield \Computer\ Group\ ID,regex='^[0-9]',regexerror='This must be a Number',required "
+	elif [[ $workflow -eq 0 ]] && [[ $passwordtype -eq 1 ]]; then
+		updateScriptLog "Workflow Selected: Static / Smart Group. Password Option: Set your own."
+		promptbeforerun="$dialogBinary \ 
 	--title \Final\Parameters \
 	--title \Final\ Parameters \
 	--icon \info \
 	--message \Please\ Fill\ in\ the\ Required\ Fields \
 	--textfield \Computer\ Group\ ID,regex='^[0-9]',regexerror='This must be a Number',required \
 	--textfield \Recovery\ Lock\ Password,required"
-elif [[ $workflow -eq 1 ]] && [[ $passwordtype -eq 0 ]]; then
-	updateScriptLog "Workflow Selected: Manual Serial Entry. Password Option: Random."
-	promptbeforerun="$dialogBinary \ 
+	elif [[ $workflow -eq 1 ]] && [[ $passwordtype -eq 0 ]]; then
+		updateScriptLog "Workflow Selected: Manual Serial Entry. Password Option: Random."
+		promptbeforerun="$dialogBinary \ 
 	--title \Final\Parameters \
 	--title \Final\ Parameters \
 	--icon \info \
 	--message \Please\ Fill\ in\ the\ Required\ Fields \
 	--textfield \Computer\ Serial\ Numbers,required \
-    --helpmessage \"$message3\" "
-elif [[ $workflow -eq 1 ]] && [[ $passwordtype -eq 1 ]]; then
-	updateScriptLog "Workflow Selected: Manual Serial Entry. Password Option: Set your own."
-	promptbeforerun="$dialogBinary \ 
+	--helpmessage \"$message3\" "
+	elif [[ $workflow -eq 1 ]] && [[ $passwordtype -eq 1 ]]; then
+		updateScriptLog "Workflow Selected: Manual Serial Entry. Password Option: Set your own."
+		promptbeforerun="$dialogBinary \ 
 	--title \Final\Parameters \
 	--title \Final\ Parameters \
 	--icon \info \
 	--message \Please\ Fill\ in\ the\ Required\ Fields \
 	--textfield \Computer\ Serial\ Numbers,required \
 	--textfield \Recovery\ Lock\ Password,required \
-    --helpmessage \"$message3\" "
-fi
-
-eval ${promptbeforerun} 2>&1 > $file
-
-rlpass=$(cat $file | grep "Password" | awk '{print $NF}')
-smartgroupselection=$(cat $file | grep "Group" | awk '{print $NF}')
-serialsearch=$(cat $file | grep "Numbers" | awk '{print $NF}')
-
-if [[ ! -z $rlpass ]]; then 
-	rmpass=0
-else
-	rmpass=1
-fi
+	--helpmessage \"$message3\" "
+	fi
 	
-if [[ ! -z $smartgroupselection ]]; then
-	prompt=0
-fi
 	
-if [[ ! -z $serialsearch ]]; then
-	prompt=2
-fi
+	eval ${promptbeforerun} 2>&1 > $file
 	
-rm -r $file
-
+	rlpass=$(cat $file | grep "Password" | awk '{print $NF}')
+	smartgroupselection=$(cat $file | grep "Group" | awk '{print $NF}')
+	serialsearch=$(cat $file | grep "Numbers" | awk '{print $NF}')
+	
+	if [[ ! -z $rlpass ]]; then 
+		rmpass=0
+	else
+		rmpass=1
+	fi
+	
+	if [[ ! -z $smartgroupselection ]]; then
+		prompt=0
+	fi
+	
+	if [[ ! -z $serialsearch ]]; then
+		prompt=2
+	fi
+	
+	rm -r $file
+	
 }	
 
 function magic {
 	
-#Files for Script to Work
-sharedfilepath="/var/tmp/recoverylock"
-jsonpath="${sharedfilepath}.json"
-csvpath="${sharedfilepath}.csv"
-pspath="${sharedfilepath}.py"
-
-if [[ -e $jsonpath ]]; then
-	updateScriptLog  "Found old JSON, deleting now"
-	rm $jsonpath
-fi
-if [[ -e $csvpath ]]; then
-	updateScriptLog "Found old csv, deleting now"
-	rm $csvpath
-fi
-if [[  -e $pspath ]]; then
-	updateScriptLog  "Found old python script, deleting now"
-	rm $pspath
-fi
+	#Files for Script to Work
+	sharedfilepath="/var/tmp/recoverylock"
+	jsonpath="${sharedfilepath}.json"
+	csvpath="${sharedfilepath}.csv"
+	pspath="${sharedfilepath}.py"
 	
-#creating python script
+	if [[ -e $jsonpath ]]; then
+		updateScriptLog  "Found old JSON, deleting now"
+		rm $jsonpath
+	fi
+	if [[ -e $csvpath ]]; then
+		updateScriptLog "Found old csv, deleting now"
+		rm $csvpath
+	fi
+	if [[  -e $pspath ]]; then
+		updateScriptLog  "Found old python script, deleting now"
+		rm $pspath
+	fi
+	
+	#creating python script
 	cat << EOF > "$pspath"
 import json
 
@@ -364,101 +353,98 @@ for pair in pairs:
 	print(pair)
 EOF
 	
-if [[ $numberofcomputers -lt 500 ]]; then
-	#recordsperpage=$numberofcomputers
-	recordsperpage=$numberofcomputers
-else
-	recordsperpage=500
-fi
-	
-if [[ $numberofcomputers -gt $recordsperpage ]]; then
-	echo "That is a lot of computers"
-	pnarrayadd=0
-	noc=$numberofcomputers
-		
-	until [[ $noc -le 0 ]]
-	do
-		tp+=($pnarrayadd)
-		noc=$((noc-$recordsperpage))
-		((pnarrayadd++))
-	done
-else
-	tp=(0)
-fi
-
-credentials=$(curl -s -X POST "$jurl/api/v1/auth/token" -H "accept: application/json" -H "Authorization: Basic '$userpass64'" | awk  '/token/{print $NF}' | tr -d \",)
-setexpire=$(($(date +%s)+1790))
-#JSON File Converted to CSV File -- This is what makes this script run 
-for pn in ${tp[@]}; do
-	jsoninfo=$(curl -X GET -s "$jurl/api/preview/computers?page=$pn&page-size=$recordsperpage&sort=name%3Aasc" -H "accept: application/json" -H "Authorization: Bearer $credentials") 
-	echo "$jsoninfo" >> $jsonpath
-	python3 "$pspath" >> $csvpath
-	rm $jsonpath
-done
-	
-nc=$(cat $csvpath | wc -l)
-echo "number of computers returned:$nc"
-
-if [[ $prompt -eq "0" ]]; then
-
-	# generate an auth token
-	authToken=$( /usr/bin/curl "${jurl}/uapi/auth/tokens" \
-	--silent \
-	--request POST \
-	--header "Authorization: Basic ${userpass64}" )
-		
-	# Create token for authorization on classic API -- Only used for Smart Search Lookup
-	token=$( /usr/bin/awk -F \" '{ print $4 }' <<< "$authToken" | /usr/bin/xargs )
-		
-	serialsreturned+=($(curl -s -X GET "$jurl/JSSResource/computergroups/id/$smartgroupselection" -H "accept: application/xml" -H "Authorization: Bearer $token" | xmllint --format - | awk -F'>|<' '/<serial_number>/{print $3}' | sort -n ))
-		
-	echo "${#serialsreturned[@]} serials found in smart group"
-	notfound=0
-	IFS=""
-	for result in ${serialsreturned[@]}; do
-		#checks for serial number in csv document
-		csn=$(grep $result $csvpath)
-		if [[ -z $csn ]]; then
-			echo "$result not found"
-			nfsn+=($result)
-			((notfound++))
-		else
-			managementid+=($(awk -F, -v serial="$result" '$1 == serial { print $2; exit }' $csvpath))
-		fi
-	done
-	if [[ $notfound -eq 0 ]] && [[ ! ${#serialsreturned[@]} -eq 0 ]]; then
-		updateScriptLog "All Serials Found in csv! Total returned: ${#serialsreturned[@]}"
+	if [[ $numberofcomputers -lt 500 ]]; then
+		#recordsperpage=$numberofcomputers
+		recordsperpage=$numberofcomputers
+	else
+		recordsperpage=500
 	fi
-	correctserials=$((${#serialsreturned[@]}-$notfound))
+	
+	if [[ $numberofcomputers -gt $recordsperpage ]]; then
+		echo "That is a lot of computers"
+		pnarrayadd=0
+		noc=$numberofcomputers
 		
-elif [[ $prompt -eq "2" ]]; then
-				
-	if [[ -z $serialsearch ]]; then
-		echo "$serialsearch not found"
+		until [[ $noc -le 0 ]]
+		do
+			tp+=($pnarrayadd)
+			noc=$((noc-$recordsperpage))
+			((pnarrayadd++))
+		done
+	else
+		tp=(0)
+	fi
+	
+	gathercredentials
+	
+	#JSON File Converted to CSV File -- This is what makes this script run 
+	for pn in ${tp[@]}; do
+		jsoninfo=$(curl -X GET -s "$url/api/preview/computers?page=$pn&page-size=$recordsperpage&sort=name%3Aasc" -H "accept: application/json" -H "Authorization: Bearer $token") 
+		echo "$jsoninfo" >> $jsonpath
+		python3 "$pspath" >> $csvpath
+		rm $jsonpath
+	done
+	
+	nc=$(cat $csvpath | wc -l)
+	updateScriptLog "number of computers returned:$nc"
+	
+	if [[ $prompt -eq "0" ]]; then
+		
+		serialsreturned+=($(curl -s "$url/JSSResource/computergroups/id/$smartgroupselection" \
+		-X GET \
+		-H "accept: application/xml" \
+		-H "Authorization: Bearer $token" | xmllint --xpath '/computer_group/computers/computer/serial_number/text()' -))
+		
+		echo "${#serialsreturned[@]} serials found in smart group"
+		notfound=0
+		IFS=""
+		for result in ${serialsreturned[@]}; do
+			#checks for serial number in csv document
+			echo "checking for $result"
+			csn=$(grep $result $csvpath)
+			echo $csn
+			if [[ -z $csn ]]; then
+				echo "$result not found"
+				nfsn+=($result)
+				((notfound++))
+			else
+				managementid+=($(awk -F, -v serial="$result" '$1 == serial { print $2; exit }' $csvpath))
+				echo ${managementid[@]}
+			fi
+		done
+		if [[ $notfound -eq 0 ]] && [[ ! ${#serialsreturned[@]} -eq 0 ]]; then
+			updateScriptLog "All Serials Found in csv! Total returned: ${#serialsreturned[@]}"
+		fi
+		correctserials=$((${#serialsreturned[@]}-$notfound))
+		
+	elif [[ $prompt -eq "2" ]]; then
+		
+		if [[ -z $serialsearch ]]; then
+			echo "$serialsearch not found"
+			exit 1
+		else
+			IFS=","
+			for result in $serialsearch; do
+				managementid+=($(awk -F, -v serial="$result" '$1 == serial { print $2; exit }' $csvpath))
+			done
+			correctserials=1
+		fi
+	else
+		exit 1
+	fi
+	
+	if [[ ${#managementid[@]} -eq 0 ]]; then
+		$dialogBinary \
+		--title \Error \
+		--message \ "$errmessage " \
+		--icon \warning 
+		updateScriptLog "No Matching Serial Numbers Found. Attempted to search ${#serialsreturned[@]} serial numbers."
 		exit 1
 	else
-		IFS=","
-		for result in $serialsearch; do
-			managementid+=($(awk -F, -v serial="$result" '$1 == serial { print $2; exit }' $csvpath))
-		done
-		correctserials=1
+		piv=$(( 100 / ${#managementid[@]} ))
 	fi
-else
-	exit 1
-fi
-
-if [[ ${#managementid[@]} -eq 0 ]]; then
-	$dialogBinary \
-	--title \Error \
-	--message \ "$errmessage " \
-	--icon \warning 
-	updateScriptLog "No Matching Serial Numbers Found. Attempted to search ${#serialsreturned[@]} serial numbers."
-	exit 1
-else
-	piv=$(( 100 / ${#managementid[@]} ))
-fi
-
-commandtime="$dialogBinary \
+	
+	commandtime="$dialogBinary \
 --title \"$title\" \
 --message \"$message\" \
 --messagealignment \center \
@@ -469,73 +455,63 @@ commandtime="$dialogBinary \
 --progresstext \"Sending Recovery Lock Commands\" \
 --button1text \"Wait\" \
 --button1disabled \
---moveable \
 --ontop \
 --commandfile \"$commandfile\" "
-
-success=0
-fail=0
-cpb=0
-
-echo "$commandtime" >> $commandfile
-dialogUpdate "progress: 1"
-
-eval ${commandtime[*]} & sleep 0.3
-
-if [[ $rmpass -eq 0 ]]; then
-
-	if [[ -z $rlpass ]]; then
-		updateScriptLog  "Set Your Own Password Selected, but no password present."
-		exit 1
+	
+	success=0
+	fail=0
+	cpb=0
+	
+	echo "$commandtime" >> $commandfile
+	dialogUpdate "progress: 1"
+	
+	eval ${commandtime[*]} & sleep 0.3
+	
+	if [[ $rmpass -eq 0 ]]; then
+		
+		if [[ -z $rlpass ]]; then
+			updateScriptLog  "Set Your Own Password Selected, but no password present."
+			exit 1
+		fi
+		for mid in ${managementid[@]}; do
+			checkTokenExpiration
+			((cpb++))
+			updateScriptLog  "Sending command $cpb of $correctserials"
+			task=$(curl -s -X POST "$url/api/preview/mdm/commands" -H "accept: application/json" -H "Authorization: Bearer $token" -H "Content-Type: application/json" -d "{\"clientData\":[{\"managementId\":\"$mid\",\"clientType\":\"COMPUTER\"}],\"commandData\":{\"commandType\":\"SET_RECOVERY_LOCK\",\"newPassword\":\"$rlpass\"}}")
+			check=$(echo "$task" | grep "id" | awk '{print ($NF)}')
+			if [[ ! -z $check ]]; then
+				((success++))
+			else
+				failedsn+=($(grep "$mid" $csvpath | awk -F '[,]' '{print $1}'))
+				updateScriptLog "FAILURE: ${failedsn[$fail]} failed to send command"
+				((fail++))
+			fi
+			dialogUpdate "progress: increment ${piv}"
+			dialogUpdate "progresstext: Sending command $cpb of $correctserials"
+		done
+	elif [[ $rmpass -eq 1 ]]; then
+		for mid in ${managementid[@]}; do
+			checkTokenExpiration
+			#creates a randomized passcode that is 15 characters long
+			rlpass=$(openssl rand -base64 15)
+			echo "Sending command $cpb of $correctserials"
+			((cpb++))
+			task=$(curl -s -X POST "$url/api/preview/mdm/commands" -H "accept: application/json" -H "Authorization: Bearer $token" -H "Content-Type: application/json" -d "{\"clientData\":[{\"managementId\":\"$mid\",\"clientType\":\"COMPUTER\"}],\"commandData\":{\"commandType\":\"SET_RECOVERY_LOCK\",\"newPassword\":\"$rlpass\"}}")
+			check=$(echo "$task" | grep "id" | awk '{print ($NF)}')
+			if [[ ! -z $check ]]; then
+				((success++))
+			else
+				failedsn+=($(grep "$mid" $csvpath | awk -F '[,]' '{print $1}'))
+				updateScriptLog "FAILURE: ${failedsn[$fail]} failed to send command"
+				((fail++))
+			fi
+			dialogUpdate "progress: increment ${piv}"
+			dialogUpdate "progresstext: Sending command $cpb of $correctserials"
+		done
 	fi
-	for mid in ${managementid[@]}; do
-		if [[ $(date +%s) -ge $setexpire ]]; then
-			updateScriptLog  "Auth token Expired, reissuing now"
-			credentials=$(curl -s -X POST "$jurl/api/v1/auth/token" -H "accept: application/json" -H "Authorization: Basic '$userpass64'" | awk  '/token/{print $NF}' | tr -d \",)
-			setexpire=$(($(date +%s)+1790))
-		fi
-		((cpb++))
-		updateScriptLog  "Sending command $cpb of $correctserials"
-		task=$(curl -s -X POST "$jurl/api/preview/mdm/commands" -H "accept: application/json" -H "Authorization: Bearer $credentials" -H "Content-Type: application/json" -d "{\"clientData\":[{\"managementId\":\"$mid\",\"clientType\":\"COMPUTER\"}],\"commandData\":{\"commandType\":\"SET_RECOVERY_LOCK\",\"newPassword\":\"$rlpass\"}}")
-		check=$(echo "$task" | grep "id" | awk '{print ($NF)}')
-		if [[ ! -z $check ]]; then
-			((success++))
-		else
-			failedsn+=($(grep "$mid" $csvpath | awk -F '[,]' '{print $1}'))
-			updateScriptLog "FAILURE: ${failedsn[$fail]} failed to send command"
-			((fail++))
-		fi
-		dialogUpdate "progress: increment ${piv}"
-		dialogUpdate "progresstext: Sending command $cpb of $correctserials"
-	done
-elif [[ $rmpass -eq 1 ]]; then
-	for mid in ${managementid[@]}; do
-		if [[ $(date +%s) -ge $setexpire ]]; then
-			updateScriptLog  "Auth token Expired, reissuing now"
-			credentials=$(curl -s -X POST "$jurl/api/v1/auth/token" -H "accept: application/json" -H "Authorization: Basic '$userpass64'" | awk  '/token/{print $NF}' | tr -d \",)
-			setexpire=$(($(date +%s)+1790))
-		fi
-		#creates a randomized passcode that is 15 characters long
-		rlpass=$(openssl rand -base64 15)
-		echo "Sending command $cpb of $correctserials"
-		((cpb++))
-		task=$(curl -s -X POST "$jurl/api/preview/mdm/commands" -H "accept: application/json" -H "Authorization: Bearer $credentials" -H "Content-Type: application/json" -d "{\"clientData\":[{\"managementId\":\"$mid\",\"clientType\":\"COMPUTER\"}],\"commandData\":{\"commandType\":\"SET_RECOVERY_LOCK\",\"newPassword\":\"$rlpass\"}}")
-		check=$(echo "$task" | grep "id" | awk '{print ($NF)}')
-		if [[ ! -z $check ]]; then
-			((success++))
-		else
-			failedsn+=($(grep "$mid" $csvpath | awk -F '[,]' '{print $1}'))
-			updateScriptLog "FAILURE: ${failedsn[$fail]} failed to send command"
-			((fail++))
-		fi
-		dialogUpdate "progress: increment ${piv}"
-		dialogUpdate "progresstext: Sending command $cpb of $correctserials"
-		sleep 10
-	done
-fi
-
-completion
-
+	
+	completion
+	
 }
 
 function finallog {
@@ -580,17 +556,7 @@ function cleanup {
 }
 
 preflight
-
-if [[ $prefill -eq 1 ]]; then
-	if [[ -e $prefillfilepath ]]; then
-		startb 
-	else
-		echo "prefill selected, but the specified file path does not exist"
-		exit 1
-	fi
-else
-	starta
-fi
+start 
 premagic
 magic 
 finallog 
