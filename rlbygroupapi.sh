@@ -15,11 +15,12 @@
 # Updates Committed February 24th 2023
 # V5 Commit Date - March 10th 2023
 # V6 Commit Date - March 20th 2023
+# V7 Commit Date
 #
 # Change Log
 # - July 24th 2023: Added the missing logic so admins can use the sharedfilepath variable (Thank you, @joshnovotny)
 # - Corrected a typo in my credits for @joshnovotny, apologies for the mistake all this time
-#
+# - DEVELOPMENT - Sept 1 -- Adding swiftDialog as the choice for prompts
 # 
 # By using this script you agree to using it "as -is".
 # Total number of computers in your environment
@@ -342,16 +343,7 @@ if [[ $fail -gt 0 ]] || [[ $notfound -gt 0 ]]; then
 fi
 	
 #cleanup
-	delete=$(osascript << EOF
-set theDialogText to "Commands Sent. Would you like to delete the old materials?"
-display dialog theDialogText buttons {"Delete", "No thanks"}
-EOF
-)
-	
-if [[ $delete =~ "Delete" ]]; then
-	echo "deleting old documents"
-	rm $csvpath
-	rm $pspath
-else 
-	exit 0
-fi
+
+rm $csvpath
+rm $pspath
+exit 0
