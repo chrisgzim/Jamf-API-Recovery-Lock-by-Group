@@ -11,16 +11,22 @@
 # Created by Chris Zimmerman 3-22-22 
 # HUGE THANK YOU to @joshnovotny-- feedback on March 7th led to this script being
 # so much better
+# Thank you to @Cr4sh0ver1de and LinkNeb for the issues sent
 # Updates Committed February 24th 2023
 # V5 Commit Date - March 10th 2023
 # V6 Commit Date - March 20th 2023
 # V7 Commit Date - September 5th 2023
+# V8 Commit Date - June 25th 2024
 #
 # Change Log
 # - July 24th 2023: Added the missing logic so admins can use the sharedfilepath variable (Thank you, @joshnovotny)
 # - Corrected a typo in my credits for @joshnovotny, apologies for the mistake all this time
 # - Streamlined Workflow with using the swiftDialog project (Credit: @bartreardon)
 # - Thank you to @dan-snelson for the Setup Your Mac Project which provided the install logic for swiftDialog and the logging for the script
+# June 25th 2024: Replaced the depracted token endpoints, now just using the one
+# - added support for API Roles and Clients Permissions Needed include: Read Computers, Read Smart Computer Groups,
+# Read Static Computer Groups, and Send Set Recovery Lock Command
+# 
 # 
 # 
 # By using this script you agree to using it "as -is".
