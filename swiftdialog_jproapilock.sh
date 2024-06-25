@@ -23,16 +23,13 @@
 # - Corrected a typo in my credits for @joshnovotny, apologies for the mistake all this time
 # - Streamlined Workflow with using the swiftDialog project (Credit: @bartreardon)
 # - Thank you to @dan-snelson for the Setup Your Mac Project which provided the install logic for swiftDialog and the logging for the script
-<<<<<<< Updated upstream
 # June 25th 2024: Replaced the depracted token endpoints, now just using the one
 # - added support for API Roles and Clients Permissions Needed include: Read Computers, Read Smart Computer Groups,
 # Read Static Computer Groups, and Send Set Recovery Lock Command
 # 
-=======
 # - June 25th 2024: Changed from the deprecated token endpoint
 # - Created some more efficient logic when building the arrays 
 # - Added Support for API Roles and Clients 
->>>>>>> Stashed changes
 # 
 # 
 # By using this script you agree to using it "as -is".
