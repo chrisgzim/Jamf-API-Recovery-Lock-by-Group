@@ -31,6 +31,7 @@
 # - Created some more efficient logic when building the arrays 
 # - Added Support for API Roles and Clients 
 # - July 18th 2024: Added an error to better reflect when issues were showing up with just returning information from a computer group
+
 # 
 # 
 # By using this script you agree to using it "as -is".
