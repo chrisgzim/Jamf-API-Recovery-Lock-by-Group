@@ -11,16 +11,26 @@
 # Created by Chris Zimmerman 3-22-22 
 # HUGE THANK YOU to @joshnovotny-- feedback on March 7th led to this script being
 # so much better
+# Thank you to @Cr4sh0ver1de and LinkNeb for the issues sent
 # Updates Committed February 24th 2023
 # V5 Commit Date - March 10th 2023
 # V6 Commit Date - March 20th 2023
 # V7 Commit Date - September 5th 2023
+# V8 Commit Date - June 25th 2024
 #
 # Change Log
 # - July 24th 2023: Added the missing logic so admins can use the sharedfilepath variable (Thank you, @joshnovotny)
 # - Corrected a typo in my credits for @joshnovotny, apologies for the mistake all this time
 # - Streamlined Workflow with using the swiftDialog project (Credit: @bartreardon)
 # - Thank you to @dan-snelson for the Setup Your Mac Project which provided the install logic for swiftDialog and the logging for the script
+# June 25th 2024: Replaced the depracted token endpoints, now just using the one
+# - added support for API Roles and Clients Permissions Needed include: Read Computers, Read Smart Computer Groups,
+# Read Static Computer Groups, and Send Set Recovery Lock Command
+# 
+# - June 25th 2024: Changed from the deprecated token endpoint
+# - Created some more efficient logic when building the arrays 
+# - Added Support for API Roles and Clients 
+# - July 18th 2024: Added an error to better reflect when issues were showing up with just returning information from a computer group
 # 
 # 
 # By using this script you agree to using it "as -is".
@@ -42,7 +52,8 @@ message1="There was a problem with your API Credentials, please try again."
 message2="Number of Managed Computers= Total number of computers that are managed in your Jamf Pro Environment \n\nAPI Username / Password= Credentials for an API account that has the following permissions: \n\nRead Computers, Read Computer Groups, and Send Recovery Lock Command. \n\nSelect Your Workflow= You can leverage a Computer Group in Jamf or you can just type in serial numbers on the next prompt. \n\nSelect Password Type= Gives an option for a randomized 15 character password or you can set your own password for all machines in scope."
 
 message3="Computer Serial Numbers Field. On this field, you can enter 1 or more serial numbers in your Jamf Pro Environment. All you have to do is separate the Serial Numbers with a comma. \n\ni.e. serialnumber1,serialnumber2,serialnumber3,etc."
-errmessage="There were no management ids found for the serials specified. Either the smart group selected or the serial numbers do not exist. Please try again"
+errmessage="There were no management ids found for the serials specified. Please try again"
+errmessage2="There was a problem returning information from the Computer Group you selected. Check the Group ID (which should only be a number) and try again."
 
 #########################################################
 ############# Script Begins #############################
@@ -198,7 +209,7 @@ function start {
 	--message \Please\ enter\ values\ into\ the\ required\ fields \
 	--checkbox \ "API Role" \
 	--icon \info \
-	--textfield \Number\ of\ Managed\ Computers\,regex="^[0-9]",regexerror="This must be a Number",required \
+	--textfield \Number\ of\ Managed\ Computers\,regex="^[0-9]+$",regexerror="This must be a Number",required \
 	--textfield \API\ Username\,required \
 	--textfield \API\ Password\,required,secure \
 	--textfield \Jamf\ Pro\ Server\ URL\,prompt="https://instance.jamfcloud.com",required \
@@ -251,7 +262,7 @@ function premagic {
 	--title \Final\ Parameters \
 	--icon \info \
 	--message \Please\ fill\ in\ the\ Required\ Fields \
-	--textfield \Computer\ Group\ ID,regex='^[0-9]',regexerror='This must be a Number',required "
+	--textfield \Computer\ Group\ ID,regex='^[0-9]+$',regexerror='This must be a Number',required "
 	elif [[ $workflow -eq 0 ]] && [[ $passwordtype -eq 1 ]]; then
 		updateScriptLog "Workflow Selected: Static / Smart Group. Password Option: Set your own."
 		promptbeforerun="$dialogBinary \ 
@@ -259,7 +270,7 @@ function premagic {
 	--title \Final\ Parameters \
 	--icon \info \
 	--message \Please\ Fill\ in\ the\ Required\ Fields \
-	--textfield \Computer\ Group\ ID,regex='^[0-9]',regexerror='This must be a Number',required \
+	--textfield \Computer\ Group\ ID,regex='^[0-9]+$',regexerror='This must be a Number',required \
 	--textfield \Recovery\ Lock\ Password,required"
 	elif [[ $workflow -eq 1 ]] && [[ $passwordtype -eq 0 ]]; then
 		updateScriptLog "Workflow Selected: Manual Serial Entry. Password Option: Random."
@@ -287,6 +298,7 @@ function premagic {
 	
 	rlpass=$(cat $file | grep "Password" | awk '{print $NF}')
 	smartgroupselection=$(cat $file | grep "Group" | awk '{print $NF}')
+	updateScriptLog "Computer Group Selected is $smartgroupselection"
 	serialsearch=$(cat $file | grep "Numbers" | awk '{print $NF}')
 	
 	if [[ ! -z $rlpass ]]; then 
@@ -394,6 +406,15 @@ EOF
 		-X GET \
 		-H "accept: application/xml" \
 		-H "Authorization: Bearer $token" | xmllint --xpath '/computer_group/computers/computer/serial_number/text()' -))
+		
+		if [[ -z $serialsreturned ]] || [[ $smartgroupselection =~ *"HTTPS STATUS"* ]]; then
+			updateScriptLog "ERROR: Nothing returned from computer group $smartgroupselection"
+			$dialogBinary \
+			--title \Error \
+			--message \ "$errmessage2 " \
+			--icon \warning 
+			exit 1
+		fi
 		
 		echo "${#serialsreturned[@]} serials found in smart group"
 		notfound=0
