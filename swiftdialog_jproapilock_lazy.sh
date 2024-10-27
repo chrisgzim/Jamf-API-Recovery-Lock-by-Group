@@ -393,7 +393,7 @@ EOF
 		jsoninfo=$(curl -X GET -s "$url/api/v1/computers-inventory?section=GENERAL&section=HARDWARE&page=$pn&page-size=$recordsperpage&sort=general.name%3Aasc" -H "accept: application/json" -H "Authorization: Bearer $token") 
 		echo "$jsoninfo" >> $jsonpath
 		python3 "$pspath" "$jsonpath" >> "$csvpath"
-		#rm $jsonpath
+		rm $jsonpath
 	done
 	
 	nc=$(cat $csvpath | wc -l)
