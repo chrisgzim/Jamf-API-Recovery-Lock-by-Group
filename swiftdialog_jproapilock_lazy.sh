@@ -17,7 +17,6 @@
 # V6 Commit Date - March 20th 2023
 # V7 Commit Date - September 5th 2023
 # V8 Commit Date - June 25th 2024
-# V9 Commit Date - October 28th 2024
 #
 # Change Log
 # - July 24th 2023: Added the missing logic so admins can use the sharedfilepath variable (Thank you, @joshnovotny)
@@ -27,16 +26,15 @@
 # June 25th 2024: Replaced the depracted token endpoints, now just using the one
 # - added support for API Roles and Clients Permissions Needed include: Read Computers, Read Smart Computer Groups,
 # Read Static Computer Groups, and Send Set Recovery Lock Command
-# 
+# - October 27th 2024: replaced deprecated endpoints of /api/preview with the updated ones (api/v1/computers) (api/v2/mdmcommands)
 #
 # 
 # - June 25th 2024: Changed from the deprecated token endpoint
 # - Created some more efficient logic when building the arrays 
 # - Added Support for API Roles and Clients 
 # - July 18th 2024: Added an error to better reflect when issues were showing up with just returning information from a computer group
-#
-# - October 28th 2024: Replaced Deprecated Endpoints (Thank you @moose-juice)
-# - replaced deprecated endpoints of /api/preview with the updated ones (api/v1/computers) (api/v2/mdmcommands)
+
+# 
 # 
 # By using this script you agree to using it "as -is".
 ########################################################
