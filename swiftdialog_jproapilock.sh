@@ -5,7 +5,7 @@
 # first starts by getting a list of serials and 
 # the corresponding management ids. (Which the 
 # number of computers will pull and make a CSV 
-# document.) {Python needed} 
+# document.) [jq required]
 #
 #
 # Created by Chris Zimmerman 3-22-22 
@@ -39,6 +39,7 @@
 # - replaced deprecated endpoints of /api/preview with the updated ones (api/v1/computers) (api/v2/mdmcommands)
 # - October 31st 2024: Removed the Managed Computers requirement
 # - Removed the input for Managed Computers as that seemed to cause more issues
+# - replaced python logic in favor of jq (Thank you @moose-juice) 
 # 
 # By using this script you agree to using it "as -is".
 ########################################################
