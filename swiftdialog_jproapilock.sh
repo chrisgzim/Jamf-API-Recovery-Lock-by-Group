@@ -345,41 +345,20 @@ function magic {
 		rm $pspath
 	fi
 	
-	#creating python script
-	cat << EOF > "$pspath"
-import json
-import sys
-
-# Get the JSON file path from the command-line arguments
-json_file_path = sys.argv[1]
-
-# Load the JSON data
-with open(json_file_path) as json_file:
-	data = json.load(json_file)
-
-# Iterate through the records and print the serial number, management id pairs
-for item in data.get("results", []):
-	management_id = item.get("general", {}).get("managementId", "N/A")
-	serial_number = item.get("hardware", {}).get("serialNumber", "N/A")
-	
-	# Print each pair in the format: serialNumber,managementId
-	print(f"{serial_number},{management_id}")
-EOF
-	
 	gathercredentials
 	
 	#JSON File Converted to CSV File -- This is what makes this script run 
 	for ((pn=0; ;pn++)); do
 		jsoninfo=$(curl -X GET -s "$url/api/v1/computers-inventory?section=GENERAL&section=HARDWARE&page=$pn&page-size=500&sort=general.name%3Aasc" -H "accept: application/json" -H "Authorization: Bearer $token")
 		updateScriptLog "Checking page number $pn for computers"
-		check=$(echo $jsoninfo | plutil -extract totalCount raw -)
+		check=$(echo $jsoninfo | jq '.totalCount' -)
 		if [[ $check -eq 0 ]]; then
-			break 
+			break
 		fi
 		echo "$jsoninfo" >> $jsonpath
 	done
 	
-	python3 "$pspath" "$jsonpath" >> "$csvpath"
+	/usr/bin/jq -r '.results[] | "\(.hardware.serialNumber // "N/A"),\(.general.managementId // "N/A")"' "$jsonpath" >> "$csvpath"
 	rm $jsonpath
 	
 	nc=$(cat $csvpath | wc -l)
@@ -401,7 +380,7 @@ EOF
 			exit 1
 		fi
 		
-		echo "${#serialsreturned[@]} serials found in smart group"
+		updateScriptLog  "${#serialsreturned[@]} serials found in smart group"
 		notfound=0
 		IFS=""
 		for result in ${serialsreturned[@]}; do
