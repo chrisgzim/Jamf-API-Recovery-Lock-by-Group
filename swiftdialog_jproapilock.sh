@@ -377,9 +377,10 @@ EOF
 			break 
 		fi
 		echo "$jsoninfo" >> $jsonpath
-		python3 "$pspath" "$jsonpath" >> "$csvpath"
-		rm $jsonpath
 	done
+	
+	python3 "$pspath" "$jsonpath" >> "$csvpath"
+	rm $jsonpath
 	
 	nc=$(cat $csvpath | wc -l)
 	updateScriptLog "number of computers returned:$nc"
