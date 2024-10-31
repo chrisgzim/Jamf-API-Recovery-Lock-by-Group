@@ -37,6 +37,8 @@
 #
 # - October 28th 2024: Replaced Deprecated Endpoints (Thank you @moose-juice)
 # - replaced deprecated endpoints of /api/preview with the updated ones (api/v1/computers) (api/v2/mdmcommands)
+# - October 31st 2024: Removed the Managed Computers requirement
+# - Removed the input for Managed Computers as that seemed to cause more issues
 # 
 # By using this script you agree to using it "as -is".
 ########################################################
@@ -54,7 +56,7 @@ log="/var/tmp/rlock.txt"
 title="Sending Recovery Lock Commands"
 message="Sending Recovery Lock Commands. Depending on the amount of commands, this could take awhile."
 message1="There was a problem with your API Credentials, please try again."
-message2="Number of Managed Computers= Total number of computers that are managed in your Jamf Pro Environment \n\nAPI Username / Password= Credentials for an API account that has the following permissions: \n\nRead Computers, Read Computer Groups, and Send Recovery Lock Command. \n\nSelect Your Workflow= You can leverage a Computer Group in Jamf or you can just type in serial numbers on the next prompt. \n\nSelect Password Type= Gives an option for a randomized 15 character password or you can set your own password for all machines in scope."
+message2="API Username / Password= Credentials for an API account that has the following permissions: \n\nRead Computers, Read Computer Groups, and Send Recovery Lock Command. \n\nSelect Your Workflow= You can leverage a Computer Group in Jamf or you can just type in serial numbers on the next prompt. \n\nSelect Password Type= Gives an option for a randomized 15 character password or you can set your own password for all machines in scope."
 
 message3="Computer Serial Numbers Field. On this field, you can enter 1 or more serial numbers in your Jamf Pro Environment. All you have to do is separate the Serial Numbers with a comma. \n\ni.e. serialnumber1,serialnumber2,serialnumber3,etc."
 errmessage="There were no management ids found for the serials specified. Please try again"
@@ -214,7 +216,6 @@ function start {
 	--message \Please\ enter\ values\ into\ the\ required\ fields \
 	--checkbox \ "API Role" \
 	--icon \info \
-	--textfield \Number\ of\ Managed\ Computers\,regex="^[0-9]+$",regexerror="This must be a Number",required \
 	--textfield \API\ Username\,required \
 	--textfield \API\ Password\,required,secure \
 	--textfield \Jamf\ Pro\ Server\ URL\,prompt="https://instance.jamfcloud.com",required \
@@ -231,7 +232,6 @@ function start {
 	username=$(cat $file | grep "API Username" | awk '{print $NF}')
 	password=$(cat $file | grep "API Password" | awk '{print $NF}')
 	url=$(cat $file | grep "Jamf Pro Server URL" | awk '{print $NF}')
-	numberofcomputers=$(cat $file | grep "Number of Managed Computers" | awk '{print $NF}')
 	workflow=$(cat $file | grep "index" | grep "Workflow" | awk '{print $NF}' | xargs)
 	passwordtype=$(cat $file | grep "index" | grep "Password" | awk '{print $NF}' | xargs)
 	apiroleusage=$(cat $file | grep "API Role" | awk '{print $NF}' | xargs)
@@ -366,33 +366,16 @@ for item in data.get("results", []):
 	print(f"{serial_number},{management_id}")
 EOF
 	
-	if [[ $numberofcomputers -lt 500 ]]; then
-		#recordsperpage=$numberofcomputers
-		recordsperpage=$numberofcomputers
-	else
-		recordsperpage=500
-	fi
-	
-	if [[ $numberofcomputers -gt $recordsperpage ]]; then
-		echo "That is a lot of computers"
-		pnarrayadd=0
-		noc=$numberofcomputers
-		
-		until [[ $noc -le 0 ]]
-		do
-			tp+=($pnarrayadd)
-			noc=$((noc-$recordsperpage))
-			((pnarrayadd++))
-		done
-	else
-		tp=(0)
-	fi
-	
 	gathercredentials
 	
 	#JSON File Converted to CSV File -- This is what makes this script run 
-	for pn in ${tp[@]}; do
-		jsoninfo=$(curl -X GET -s "$url/api/v1/computers-inventory?section=GENERAL&section=HARDWARE&page=$pn&page-size=$recordsperpage&sort=general.name%3Aasc" -H "accept: application/json" -H "Authorization: Bearer $token") 
+	for ((pn=0; ;pn++)); do
+		jsoninfo=$(curl -X GET -s "$url/api/v1/computers-inventory?section=GENERAL&section=HARDWARE&page=$pn&page-size=500&sort=general.name%3Aasc" -H "accept: application/json" -H "Authorization: Bearer $token")
+		updateScriptLog "Checking page number $pn for computers"
+		check=$(echo $jsoninfo | plutil -extract totalCount raw -)
+		if [[ $check -eq 0 ]]; then
+			break 
+		fi
 		echo "$jsoninfo" >> $jsonpath
 		python3 "$pspath" "$jsonpath" >> "$csvpath"
 		rm $jsonpath
