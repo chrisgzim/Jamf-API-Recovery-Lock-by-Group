@@ -233,6 +233,12 @@ function start {
 	username=$(cat $file | grep "API Username" | awk '{print $NF}')
 	password=$(cat $file | grep "API Password" | awk '{print $NF}')
 	url=$(cat $file | grep "Jamf Pro Server URL" | awk '{print $NF}')
+	if [[ "$url" == */ ]]; then
+		updateScriptLog "Trailing Slash detected, formatting for future curl calls"
+		url=${url%?}
+	else
+		updateScriptLog "URL is ready to go"
+	fi
 	workflow=$(cat $file | grep "index" | grep "Workflow" | awk '{print $NF}' | xargs)
 	passwordtype=$(cat $file | grep "index" | grep "Password" | awk '{print $NF}' | xargs)
 	apiroleusage=$(cat $file | grep "API Role" | awk '{print $NF}' | xargs)
