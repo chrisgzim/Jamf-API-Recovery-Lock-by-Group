@@ -1,11 +1,7 @@
 #!/bin/bash
 ########### RECOVERY LOCK SCRIPT (M1) ###########
 # This Script allows you to select a smart group,
-# static group, or a list of serial numbers. It
-# first starts by getting a list of serials and 
-# the corresponding management ids. (Which the 
-# number of computers will pull and make a CSV 
-# document.) [jq required]
+# static group, or a list of serial numbers.
 #
 #
 # Created by Chris Zimmerman 3-22-22 
@@ -18,6 +14,7 @@
 # V7 Commit Date - September 5th 2023
 # V8 Commit Date - June 25th 2024
 # V9 Commit Date - October 28th 2024
+# V10 Commit Date - November 5th 2024
 #
 # Change Log
 # - July 24th 2023: Added the missing logic so admins can use the sharedfilepath variable (Thank you, @joshnovotny)
@@ -40,6 +37,12 @@
 # - October 31st 2024: Removed the Managed Computers requirement
 # - Removed the input for Managed Computers as that seemed to cause more issues
 # - replaced python logic in favor of jq (Thank you @moose-juice) 
+#
+#
+# - November 5th 2024:
+# - Replaced the logic to get all of the computer management ids (They are now retrieved on demand.) 
+# - Added Logic to remove the trailing slash in URLS as it affected the ability to grab computers from a smart group
+# - Thank you @Cr4sh0ver1de and @joshnovotny for bringing up the issues
 # 
 # By using this script you agree to using it "as -is".
 ########################################################
@@ -233,6 +236,12 @@ function start {
 	username=$(cat $file | grep "API Username" | awk '{print $NF}')
 	password=$(cat $file | grep "API Password" | awk '{print $NF}')
 	url=$(cat $file | grep "Jamf Pro Server URL" | awk '{print $NF}')
+	if [[ "$url" == */ ]]; then
+		updateScriptLog "Trailing Slash detected, formatting for future curl calls"
+		url=${url%?}
+	else
+		updateScriptLog "URL is ready to go"
+	fi
 	workflow=$(cat $file | grep "index" | grep "Workflow" | awk '{print $NF}' | xargs)
 	passwordtype=$(cat $file | grep "index" | grep "Password" | awk '{print $NF}' | xargs)
 	apiroleusage=$(cat $file | grep "API Role" | awk '{print $NF}' | xargs)
@@ -326,53 +335,19 @@ function premagic {
 }	
 
 function magic {
-	
-	#Files for Script to Work
-	sharedfilepath="/var/tmp/recoverylock"
-	jsonpath="${sharedfilepath}.json"
-	csvpath="${sharedfilepath}.csv"
-	pspath="${sharedfilepath}.py"
-	
-	if [[ -e $jsonpath ]]; then
-		updateScriptLog  "Found old JSON, deleting now"
-		rm $jsonpath
-	fi
-	if [[ -e $csvpath ]]; then
-		updateScriptLog "Found old csv, deleting now"
-		rm $csvpath
-	fi
-	if [[  -e $pspath ]]; then
-		updateScriptLog  "Found old python script, deleting now"
-		rm $pspath
-	fi
-	
+		
 	gathercredentials
-	
-	#JSON File Converted to CSV File -- This is what makes this script run 
-	for ((pn=0; ;pn++)); do
-		jsoninfo=$(curl -X GET -s "$url/api/v1/computers-inventory?section=GENERAL&section=HARDWARE&page=$pn&page-size=500&sort=general.name%3Aasc" -H "accept: application/json" -H "Authorization: Bearer $token")
-		updateScriptLog "Checking page number $pn for computers"
-		check=$(echo $jsoninfo | jq '.totalCount' -)
-		if [[ $check -eq 0 ]]; then
-			break
-		fi
-		echo "$jsoninfo" >> $jsonpath
-	done
-	
-	/usr/bin/jq -r '.results[] | "\(.hardware.serialNumber // "N/A"),\(.general.managementId // "N/A")"' "$jsonpath" >> "$csvpath"
-	rm $jsonpath
-	
-	nc=$(cat $csvpath | wc -l)
-	updateScriptLog "number of computers returned:$nc"
 	
 	if [[ $prompt -eq "0" ]]; then
 		
-		serialsreturned+=($(curl -s "$url/JSSResource/computergroups/id/$smartgroupselection" \
+		idsreturned+=($(curl -s "$url/JSSResource/computergroups/id/$smartgroupselection" \
 		-X GET \
 		-H "accept: application/xml" \
-		-H "Authorization: Bearer $token" | xmllint --xpath '/computer_group/computers/computer/serial_number/text()' -))
+		-H "Authorization: Bearer $token" | xmllint --xpath '/computer_group/computers/computer/id/text()' -))
 		
-		if [[ -z $serialsreturned ]] || [[ $smartgroupselection =~ *"HTTPS STATUS"* ]]; then
+		echo ${idsreturned[@]}
+		
+		if [[ -z $idsreturned ]] || [[ $smartgroupselection =~ *"HTTPS STATUS"* ]]; then
 			updateScriptLog "ERROR: Nothing returned from computer group $smartgroupselection"
 			$dialogBinary \
 			--title \Error \
@@ -381,27 +356,7 @@ function magic {
 			exit 1
 		fi
 		
-		updateScriptLog  "${#serialsreturned[@]} serials found in smart group"
-		notfound=0
-		IFS=""
-		for result in ${serialsreturned[@]}; do
-			#checks for serial number in csv document
-			echo "checking for $result"
-			csn=$(grep $result $csvpath)
-			echo $csn
-			if [[ -z $csn ]]; then
-				echo "$result not found"
-				nfsn+=($result)
-				((notfound++))
-			else
-				managementid+=($(awk -F, -v serial="$result" '$1 == serial { print $2; exit }' $csvpath))
-				echo ${managementid[@]}
-			fi
-		done
-		if [[ $notfound -eq 0 ]] && [[ ! ${#serialsreturned[@]} -eq 0 ]]; then
-			updateScriptLog "All Serials Found in csv! Total returned: ${#serialsreturned[@]}"
-		fi
-		correctserials=$((${#serialsreturned[@]}-$notfound))
+		updateScriptLog  "${#idsreturned[@]} computers found in computer group"
 		
 	elif [[ $prompt -eq "2" ]]; then
 		
@@ -411,7 +366,10 @@ function magic {
 		else
 			IFS=","
 			for result in $serialsearch; do
-				managementid+=($(awk -F, -v serial="$result" '$1 == serial { print $2; exit }' $csvpath))
+				idsreturned+=($(curl -s "$url/JSSResource/computers/serialnumber/$result" \
+		-X GET \
+		-H "accept: application/xml" \
+		-H "Authorization: Bearer $token" | xmllint --xpath '/computer/general/id/text()' -))
 			done
 			correctserials=1
 		fi
@@ -419,16 +377,8 @@ function magic {
 		exit 1
 	fi
 	
-	if [[ ${#managementid[@]} -eq 0 ]]; then
-		$dialogBinary \
-		--title \Error \
-		--message \ "$errmessage " \
-		--icon \warning 
-		updateScriptLog "No Matching Serial Numbers Found. Attempted to search ${#serialsreturned[@]} serial numbers."
-		exit 1
-	else
-		piv=$(( 100 / ${#managementid[@]} ))
-	fi
+	piv=$(( 100 / ${#idsreturned[@]} ))
+
 	
 	commandtime="$dialogBinary \
 --title \"$title\" \
@@ -459,40 +409,55 @@ function magic {
 			updateScriptLog  "Set Your Own Password Selected, but no password present."
 			exit 1
 		fi
-		for mid in ${managementid[@]}; do
+		for id in ${idsreturned[@]}; do
 			checkTokenExpiration
 			((cpb++))
-			updateScriptLog  "Sending command $cpb of $correctserials"
-			task=$(curl -s -X POST "$url/api/v2/mdm/commands" -H "accept: application/json" -H "Authorization: Bearer $token" -H "Content-Type: application/json" -d "{\"clientData\":[{\"managementId\":\"$mid\",\"clientType\":\"COMPUTER\"}],\"commandData\":{\"commandType\":\"SET_RECOVERY_LOCK\",\"newPassword\":\"$rlpass\"}}")
-			check=$(echo "$task" | grep "id" | awk '{print ($NF)}')
-			if [[ ! -z $check ]]; then
-				((success++))
-			else
-				failedsn+=($(grep "$mid" $csvpath | awk -F '[,]' '{print $1}'))
-				updateScriptLog "FAILURE: ${failedsn[$fail]} failed to send command"
+			updateScriptLog  "Checking for Management ID for Computer ID ${idsreturned[$(($cpb - 1))]}"
+			mid=$(curl -s $url/api/v1/computers-inventory-detail/$id -H accept: "application/json' -H "Authorization: Bearer $token | plutil -extract general.managementId raw -)
+			if [[ -z $mid ]]; then
+				failedsnnomid+=($(curl -s $url/JSSResource/computer/id/$id -X GET -H "accept: application/xml" -H "Authorization: Bearer $token | xmllint --xpath '/computer/general/serial_number/text()" -))
+				updateScriptLog "ERROR: Unable to locate Management ID for ${failedsnnomid[$(($cpb - 1))]}"
 				((fail++))
-			fi
+			else
+				task=$(curl -s -X POST "$url/api/v2/mdm/commands" -H "accept: application/json" -H "Authorization: Bearer $token" -H "Content-Type: application/json" -d "{\"clientData\":[{\"managementId\":\"$mid\",\"clientType\":\"COMPUTER\"}],\"commandData\":{\"commandType\":\"SET_RECOVERY_LOCK\",\"newPassword\":\"$rlpass\"}}")
+				check=$(echo "$task" | grep "id" | awk '{print ($NF)}')
+				if [[ ! -z $check ]]; then
+					((success++))
+				else
+					failedsn+=($fsn)
+					updateScriptLog "FAILURE: ${failedsn[$fail]} failed to send command"
+					((fail++))
+				fi
 			dialogUpdate "progress: increment ${piv}"
-			dialogUpdate "progresstext: Sending command $cpb of $correctserials"
+			dialogUpdate "progresstext: Sending command $cpb of ${#idsreturned[@]}"
+			fi
 		done
 	elif [[ $rmpass -eq 1 ]]; then
-		for mid in ${managementid[@]}; do
+		for id in ${idsreturned[@]}; do
 			checkTokenExpiration
 			#creates a randomized passcode that is 15 characters long
 			rlpass=$(openssl rand -base64 15)
-			echo "Sending command $cpb of $correctserials"
+			echo "Sending command $cpb of ${#idsreturned[@]}"
 			((cpb++))
-			task=$(curl -s -X POST "$url/api/v2/mdm/commands" -H "accept: application/json" -H "Authorization: Bearer $token" -H "Content-Type: application/json" -d "{\"clientData\":[{\"managementId\":\"$mid\",\"clientType\":\"COMPUTER\"}],\"commandData\":{\"commandType\":\"SET_RECOVERY_LOCK\",\"newPassword\":\"$rlpass\"}}")
-			check=$(echo "$task" | grep "id" | awk '{print ($NF)}')
-			if [[ ! -z $check ]]; then
-				((success++))
-			else
-				failedsn+=($(grep "$mid" $csvpath | awk -F '[,]' '{print $1}'))
-				updateScriptLog "FAILURE: ${failedsn[$fail]} failed to send command"
+			updateScriptLog  "Checking for Management ID for Computer ID ${idsreturned[$(($cpb - 1))]}"
+			mid=$(curl -s $url/api/v1/computers-inventory-detail/$id -H accept: "application/json' -H "Authorization: Bearer $token | plutil -extract general.managementId raw -)
+			if [[ -z $mid ]]; then
+				failedsnnomid+=($(curl -s $url/JSSResource/computer/id/$id -X GET -H "accept: application/xml" -H "Authorization: Bearer $token | xmllint --xpath '/computer/general/serial_number/text()" -))
+				updateScriptLog "ERROR: Unable to locate Management ID for ${failedsnnomid[$(($cpb - 1))]}"
 				((fail++))
+			else
+				task=$(curl -s -X POST "$url/api/v2/mdm/commands" -H "accept: application/json" -H "Authorization: Bearer $token" -H "Content-Type: application/json" -d "{\"clientData\":[{\"managementId\":\"$mid\",\"clientType\":\"COMPUTER\"}],\"commandData\":{\"commandType\":\"SET_RECOVERY_LOCK\",\"newPassword\":\"$rlpass\"}}")
+				check=$(echo "$task" | grep "id" | awk '{print ($NF)}')
+				if [[ ! -z $check ]]; then
+					((success++))
+				else
+					failedsn+=($(curl -s $url/JSSResource/computer/id/$id -X GET -H "accept: application/xml" -H "Authorization: Bearer $token | xmllint --xpath '/computer/general/serial_number/text()" -))
+					updateScriptLog "FAILURE: ${failedsn[$fail]} failed to send command"
+					((fail++))
+				fi
 			fi
 			dialogUpdate "progress: increment ${piv}"
-			dialogUpdate "progresstext: Sending command $cpb of $correctserials"
+			dialogUpdate "progresstext: Sending command $cpb of ${#idsreturned[@]}"
 		done
 	fi
 	
@@ -514,28 +479,26 @@ function finallog {
 		updateScriptLog  "FAILURE FINAL LOG: Failed Serials on $(date):" 
 		formatsn=$(printf '%s\n' "${failedsn[@]}")
 		updateScriptLog "$formatsn"
-		updateScriptLog "NOT FOUND FINAL LOG: Serials that could not be found from Smart Group:"
-		formatns=$(printf '%s\n' "${nfsn[@]}")
+		updateScriptLog "NOT FOUND FINAL LOG: Serials that could not find a managementID:"
+		formatns=$(printf '%s\n' "${failedsnnomid[@]}")
 		updateScriptLog "$formatns"
 	fi
 }
 
 function completion() {
 	
-	dialogUpdate  "title: Recovery Locks Sent"
-	dialogUpdate  "message: $cpb commands attempted on $correctserials computers. \n\nSuccessful Sends: $success \nFailed Sends: $fail \nSerials Not Found: $notfound \n\nFor more information check out $log"
+	dialogUpdate "title: Recovery Locks Sent"
+	dialogUpdate "message: $cpb commands attempted on $correctserials computers. \n\nSuccessful Sends: $success \nFailed Sends: $fail \nSerials Not Found: $notfound \n\nFor more information check out $log"
 	dialogUpdate "progresstext: All commands sent"
 	dialogUpdate "progress: complete"
-	dialogUpdate  "button1: enable"
-	dialogUpdate  "button1text: Continue"
+	dialogUpdate "button1: enable"
+	dialogUpdate "button1text: Continue"
 	
 	sleep 10
 }
 
 function cleanup {
 	
-	rm -r ${sharedfilepath}.csv
-	rm -r ${sharedfilepath}.py
 	rm -r $commandfile
 	updateScriptLog "Removed Working Files"
 	
