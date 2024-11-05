@@ -1,12 +1,10 @@
 # Jamf-API-Recovery-Lock-by-Group
 
-This script does use Python in order to work as it parses information from a JSON file and dumps it to a CSV. 
+This is a script I made to make things easier for admins to send Recovery Lock Commands to their endpoints. (Had they forgotten to set the setting in their Prestage.) It also serves as an option if admins want to rotate their Recovery Lock Passwords as well! 
 
-This is a script I made to try a couple of new things. The goal is to leverage the API to pull the serial number and management id from the inventory record of all computers. 
+Put in some credentials (API Role or Standard Account), your URL, and how you want to input your computers! (I prefer the static or smart group option myself.) The script will then get a list of machines and start pushing out the API command to set the Recovery Lock Password.
 
-The information is set up as a CSV document that will go ahead and search by serials to find the corresponding management id. You can also pull a smart group by entering the Smart Group Id. All of the serial numbers from that group will automatically be searched for in the CSV document and then will put whatever recovery lock password you would like for that group of machines. 
-
-Currently the Recovery Lock API call does not have a way to set randomized passwords (this can only be done through pre-stage enrollment. However, this script can create randomized passwords -- if you so choose. The password will be randomized for each computer that is sent the recovery lock password command. 
+Currently the Recovery Lock API call does not have a way to set randomized passwords (this can only be done through pre-stage enrollment. However, this script can create randomized passwords -- if you so choose. The password will be randomized for each computer.) 
 
 
 ## UPDATE 9-5-23

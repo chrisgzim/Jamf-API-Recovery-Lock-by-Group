@@ -1,7 +1,11 @@
 #!/bin/bash
 ########### RECOVERY LOCK SCRIPT (M1) ###########
 # This Script allows you to select a smart group,
-# static group, or a list of serial numbers.
+# static group, or a list of serial numbers. It
+# first starts by getting a list of serials and 
+# the corresponding management ids. (Which the 
+# number of computers will pull and make a CSV 
+# document.) [jq required]
 #
 #
 # Created by Chris Zimmerman 3-22-22 
@@ -14,7 +18,6 @@
 # V7 Commit Date - September 5th 2023
 # V8 Commit Date - June 25th 2024
 # V9 Commit Date - October 28th 2024
-# V10 Commit Date - November 5th 2024
 #
 # Change Log
 # - July 24th 2023: Added the missing logic so admins can use the sharedfilepath variable (Thank you, @joshnovotny)
@@ -37,12 +40,6 @@
 # - October 31st 2024: Removed the Managed Computers requirement
 # - Removed the input for Managed Computers as that seemed to cause more issues
 # - replaced python logic in favor of jq (Thank you @moose-juice) 
-#
-#
-# - November 5th 2024:
-# - Replaced the logic to get all of the computer management ids (They are now retrieved on demand.) 
-# - Added Logic to remove the trailing slash in URLS as it affected the ability to grab computers from a smart group
-# - Thank you @Cr4sh0ver1de and @joshnovotny for bringing up the issues
 # 
 # By using this script you agree to using it "as -is".
 ########################################################
