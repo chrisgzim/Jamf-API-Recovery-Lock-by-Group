@@ -43,6 +43,9 @@
 # - Replaced the logic to get all of the computer management ids (They are now retrieved on demand.) 
 # - Added Logic to remove the trailing slash in URLS as it affected the ability to grab computers from a smart group
 # - Thank you @Cr4sh0ver1de and @joshnovotny for bringing up the issues
+# - November 26th 2024:
+# - Fixed some logic that would make the script appear to be working, but wasn't actually sending any commands.
+# - Fixed some logic to determine if there is an error happening when locating the Management ID
 # 
 # By using this script you agree to using it "as -is".
 ########################################################
@@ -345,7 +348,7 @@ function magic {
 		-H "accept: application/xml" \
 		-H "Authorization: Bearer $token" | xmllint --xpath '/computer_group/computers/computer/id/text()' -))
 		
-		echo ${idsreturned[@]}
+		updateScriptLog "Total of IDs returned from Group ID $smartgroupselection: ${#idsreturned[@]}"
 		
 		if [[ -z $idsreturned ]] || [[ $smartgroupselection =~ *"HTTPS STATUS"* ]]; then
 			updateScriptLog "ERROR: Nothing returned from computer group $smartgroupselection"
@@ -379,7 +382,6 @@ function magic {
 	
 	piv=$(( 100 / ${#idsreturned[@]} ))
 
-	
 	commandtime="$dialogBinary \
 --title \"$title\" \
 --message \"$message\" \
@@ -412,10 +414,10 @@ function magic {
 		for id in ${idsreturned[@]}; do
 			checkTokenExpiration
 			((cpb++))
-			updateScriptLog  "Checking for Management ID for Computer ID ${idsreturned[$(($cpb - 1))]}"
-			mid=$(curl -s $url/api/v1/computers-inventory-detail/$id -H accept: "application/json' -H "Authorization: Bearer $token | plutil -extract general.managementId raw -)
-			if [[ -z $mid ]]; then
-				failedsnnomid+=($(curl -s $url/JSSResource/computer/id/$id -X GET -H "accept: application/xml" -H "Authorization: Bearer $token | xmllint --xpath '/computer/general/serial_number/text()" -))
+			updateScriptLog "Checking for Management ID for Computer ID ${idsreturned[$(($cpb - 1))]}"
+			mid=$(curl -s $url/api/v1/computers-inventory-detail/$id -H accept: "application/json" -H "Authorization: Bearer $token" | plutil -extract general.managementId raw -)
+			if [[ -z $mid ]] || [[ $mid == *"error"* ]]; then
+				failedsnnomid+=($(curl -s $url/JSSResource/computers/id/$id -X GET -H "accept: application/xml" -H "Authorization: Bearer $token" | xmllint --xpath '/computer/general/serial_number/text()' -))
 				updateScriptLog "ERROR: Unable to locate Management ID for ${failedsnnomid[$(($cpb - 1))]}"
 				((fail++))
 			else
@@ -437,12 +439,12 @@ function magic {
 			checkTokenExpiration
 			#creates a randomized passcode that is 15 characters long
 			rlpass=$(openssl rand -base64 15)
-			echo "Sending command $cpb of ${#idsreturned[@]}"
+			updateScriptLog "Sending command $cpb of ${#idsreturned[@]}"
 			((cpb++))
 			updateScriptLog  "Checking for Management ID for Computer ID ${idsreturned[$(($cpb - 1))]}"
-			mid=$(curl -s $url/api/v1/computers-inventory-detail/$id -H accept: "application/json' -H "Authorization: Bearer $token | plutil -extract general.managementId raw -)
-			if [[ -z $mid ]]; then
-				failedsnnomid+=($(curl -s $url/JSSResource/computer/id/$id -X GET -H "accept: application/xml" -H "Authorization: Bearer $token | xmllint --xpath '/computer/general/serial_number/text()" -))
+			mid=$(curl -s $url/api/v1/computers-inventory-detail/$id -H accept: "application/json" -H "Authorization: Bearer $token" | plutil -extract general.managementId raw -)
+			if [[ -z $mid ]] || [[ $mid == *"error"* ]]; then
+				failedsnnomid+=($(curl -s $url/JSSResource/computers/id/$id -X GET -H "accept: application/xml" -H "Authorization: Bearer $token" | xmllint --xpath '/computer/general/serial_number/text()' -))
 				updateScriptLog "ERROR: Unable to locate Management ID for ${failedsnnomid[$(($cpb - 1))]}"
 				((fail++))
 			else
@@ -488,7 +490,7 @@ function finallog {
 function completion() {
 	
 	dialogUpdate "title: Recovery Locks Sent"
-	dialogUpdate "message: $cpb commands attempted on $correctserials computers. \n\nSuccessful Sends: $success \nFailed Sends: $fail \nSerials Not Found: $notfound \n\nFor more information check out $log"
+	dialogUpdate "message: $cpb commands attempted on $correctserials computers. \n\nSuccessful Sends: $success \nFailed Sends: $fail \n\nFor more information check out $log"
 	dialogUpdate "progresstext: All commands sent"
 	dialogUpdate "progress: complete"
 	dialogUpdate "button1: enable"
