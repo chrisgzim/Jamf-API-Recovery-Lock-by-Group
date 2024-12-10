@@ -47,6 +47,10 @@
 # - Fixed some logic that would make the script appear to be working, but wasn't actually sending any commands.
 # - Fixed some logic to determine if there is an error happening when locating the Management ID
 # 
+# - December 10th 2024:
+# - Replaced logic that would incorrectly show a computer as being sent the command when it actually did not get the command
+# - Will commit to a verbose mode by EOY
+# 
 # By using this script you agree to using it "as -is".
 ########################################################
 
@@ -422,8 +426,8 @@ function magic {
 				((fail++))
 			else
 				task=$(curl -s -X POST "$url/api/v2/mdm/commands" -H "accept: application/json" -H "Authorization: Bearer $token" -H "Content-Type: application/json" -d "{\"clientData\":[{\"managementId\":\"$mid\",\"clientType\":\"COMPUTER\"}],\"commandData\":{\"commandType\":\"SET_RECOVERY_LOCK\",\"newPassword\":\"$rlpass\"}}")
-				check=$(echo "$task" | grep "id" | awk '{print ($NF)}')
-				if [[ ! -z $check ]]; then
+				check=$(echo "$task" | grep "httpStatus" | awk '{print ($NF)}')
+				if [[ -z $check ]]; then
 					((success++))
 				else
 					failedsn+=($fsn)
@@ -449,8 +453,8 @@ function magic {
 				((fail++))
 			else
 				task=$(curl -s -X POST "$url/api/v2/mdm/commands" -H "accept: application/json" -H "Authorization: Bearer $token" -H "Content-Type: application/json" -d "{\"clientData\":[{\"managementId\":\"$mid\",\"clientType\":\"COMPUTER\"}],\"commandData\":{\"commandType\":\"SET_RECOVERY_LOCK\",\"newPassword\":\"$rlpass\"}}")
-				check=$(echo "$task" | grep "id" | awk '{print ($NF)}')
-				if [[ ! -z $check ]]; then
+				check=$(echo "$task" | grep "httpStatus" | awk '{print ($NF)}')
+				if [[ -z $check ]]; then
 					((success++))
 				else
 					failedsn+=($(curl -s $url/JSSResource/computer/id/$id -X GET -H "accept: application/xml" -H "Authorization: Bearer $token | xmllint --xpath '/computer/general/serial_number/text()" -))
